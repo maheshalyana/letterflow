@@ -16,6 +16,8 @@ import 'react-toastify/dist/ReactToastify.css';
 import DocumentHeader from '../components/DocumentHeader';
 import websocketService from '../services/websocket';
 import { useParams, useNavigate } from 'react-router-dom';
+import ProfileImage from '../components/ProfileImage';
+import { clearImageCache } from '../utils/imageCache';
 
 const Home = () => {
     const [selectedDocument, setSelectedDocument] = useState(null);
@@ -34,6 +36,7 @@ const Home = () => {
     const { items: documents, currentDocument } = useSelector(state => state.documents);
 
     const handleLogout = () => {
+        clearImageCache();
         dispatch(clearUser());
         localStorage.removeItem('token');
         navigate('/login');
@@ -196,17 +199,7 @@ const Home = () => {
                     {/* Fixed Footer with User Info */}
                     <div className="flex-shrink-0 border-t bg-white p-4">
                         <div className="flex items-center gap-3">
-                            {currentUser?.picture ? (
-                                <img
-                                    src={currentUser.picture}
-                                    alt={currentUser.name}
-                                    className="w-8 h-8 rounded-full"
-                                />
-                            ) : (
-                                <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
-                                    {currentUser?.name?.[0]?.toUpperCase()}
-                                </div>
-                            )}
+                            <ProfileImage user={currentUser} size={8} />
                             <div className="flex-1 min-w-0">
                                 <h2 className="font-medium truncate">{currentUser?.name}</h2>
                                 <p className="text-sm text-gray-500 truncate">{currentUser?.email}</p>

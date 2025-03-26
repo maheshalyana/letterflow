@@ -5,6 +5,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import { updateDocument, deleteDocument } from '../store/documentSlice';
 import websocketService from '../services/websocket';
 import { toast } from 'react-toastify';
+import ProfileImage from './ProfileImage';
 
 const DocumentHeader = ({ document }) => {
     const [isShareModalOpen, setIsShareModalOpen] = useState(false);
@@ -95,27 +96,12 @@ const DocumentHeader = ({ document }) => {
                                 key={user.uid}
                                 className="relative group"
                             >
-                                {user.picture ? (
-                                    <div className="relative">
-                                        <img
-                                            src={user.picture}
-                                            alt={user.name}
-                                            className={`w-8 h-8 rounded-full border-2 ${isActive ? 'border-green-500' : 'border-white'}`}
-                                        />
-                                        {isActive && (
-                                            <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border border-white"></div>
-                                        )}
-                                    </div>
-                                ) : (
-                                    <div className="relative">
-                                        <div className={`w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-white border-2 ${isActive ? 'border-green-500' : 'border-white'}`}>
-                                            {user.name[0]}
-                                        </div>
-                                        {isActive && (
-                                            <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border border-white"></div>
-                                        )}
-                                    </div>
-                                )}
+                                <ProfileImage
+                                    user={user}
+                                    size={8}
+                                    showActiveStatus={true}
+                                    isActive={isActive}
+                                />
                                 <div className="absolute top-full mb-2 hidden group-hover:block bg-gray-800 text-white text-xs rounded px-2 py-1 whitespace-nowrap">
                                     {user.name} {isActive ? '(active)' : ''}
                                     {user.uid === document?.userId ? ' (owner)' : ''}
