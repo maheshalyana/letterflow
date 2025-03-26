@@ -7,7 +7,6 @@ import { WS_BASE_URL } from '../config/api';
 
 class WebSocketService {
     constructor() {
-        this.connections = new Map();
         this.docs = new Map();
         this.providers = new Map();
         this.callbacks = new Map();
@@ -21,7 +20,7 @@ class WebSocketService {
         // Get or create Y.js document
         const ydoc = this.getYDoc(documentId);
 
-        // Create WebSocket provider with full URL including query parameters
+        // Create WebSocket URL with query parameters
         const wsUrl = new URL('/documents', WS_BASE_URL);
         wsUrl.searchParams.append('documentId', documentId);
         wsUrl.searchParams.append('token', token);
@@ -30,52 +29,72 @@ class WebSocketService {
         wsUrl.searchParams.append('userPicture', currentUser.picture || '');
         wsUrl.searchParams.append('userColor', this.getRandomColor());
 
-        const provider = new WebsocketProvider(
-            wsUrl.toString(), // Use the full URL with query parameters
-            documentId,
-            ydoc,
-            {
-                connect: true,
-                awareness: {
-                    user: {
-                        name: currentUser.name || 'Anonymous',
-                        color: this.getRandomColor(),
-                        id: currentUser.uid,
-                        picture: currentUser.picture || '',
+        try {
+            // Create WebSocket provider
+            const provider = new WebsocketProvider(
+                WS_BASE_URL,
+                documentId,
+                ydoc,
+                {
+                    WebSocketPolyfill: WebSocket,
+                    awareness: {
+                        user: {
+                            name: currentUser.name || 'Anonymous',
+                            color: this.getRandomColor(),
+                            id: currentUser.uid,
+                            picture: currentUser.picture || '',
+                        }
                     }
                 }
-            }
-        );
+            );
 
-        // Store the provider
-        this.providers.set(documentId, provider);
+            // Store the provider
+            this.providers.set(documentId, provider);
 
-        // Handle connection status
-        provider.on('status', event => {
-            console.log('Connection status:', event.status);
-            if (event.status === 'connected') {
+            // Log connection status changes
+            provider.awareness.on('change', () => {
+                console.log('Awareness change');
+            });
+
+            provider.ws.addEventListener('open', () => {
                 console.log('WebSocket connected successfully');
-            }
-        });
+            });
 
-        // Handle connection errors
-        provider.on('connection-error', error => {
-            console.error('WebSocket connection error:', error);
-        });
+            provider.ws.addEventListener('error', (error) => {
+                console.error('WebSocket error:', error);
+            });
 
-        return provider;
+            provider.ws.addEventListener('close', () => {
+                console.log('WebSocket connection closed');
+            });
+
+            return provider;
+        } catch (error) {
+            console.error('Error creating WebSocket provider:', error);
+            throw error;
+        }
     }
 
     disconnect(documentId) {
         const provider = this.providers.get(documentId);
         if (provider) {
-            provider.destroy();
-            this.providers.delete(documentId);
+            try {
+                provider.awareness?.destroy();
+                provider.ws?.close();
+                provider.destroy();
+                this.providers.delete(documentId);
+            } catch (error) {
+                console.error('Error during disconnect:', error);
+            }
         }
         const doc = this.docs.get(documentId);
         if (doc) {
-            doc.destroy();
-            this.docs.delete(documentId);
+            try {
+                doc.destroy();
+                this.docs.delete(documentId);
+            } catch (error) {
+                console.error('Error destroying doc:', error);
+            }
         }
     }
 

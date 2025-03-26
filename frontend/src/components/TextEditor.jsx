@@ -99,20 +99,22 @@ const TextEditor = ({ onContentChange, currentDocument }) => {
                     ytext.insert(0, currentDocument.content);
                 }
 
-                // Wait for provider to be connected before setting state
-                provider.on('status', ({ status }) => {
-                    console.log('Provider status:', status);
-                    if (status === 'connected') {
-                        setProvider(provider);
-                        setYdoc(newYdoc);
-                        setIsCollaborationReady(true);
-                    }
+                // Handle WebSocket events
+                provider.ws.addEventListener('open', () => {
+                    console.log('WebSocket connected');
+                    setProvider(provider);
+                    setYdoc(newYdoc);
+                    setIsCollaborationReady(true);
                 });
 
-                // Handle connection errors
-                provider.on('connection-error', (error) => {
-                    console.error('Provider connection error:', error);
+                provider.ws.addEventListener('error', (error) => {
+                    console.error('WebSocket error:', error);
                     toast.error('Connection error. Please try refreshing the page.');
+                });
+
+                provider.ws.addEventListener('close', () => {
+                    console.log('WebSocket disconnected');
+                    setIsCollaborationReady(false);
                 });
 
                 return () => {
