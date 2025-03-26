@@ -13,5 +13,5 @@ const WS_PROTOCOL = isDevelopment ? 'ws' : 'wss';
 // In production, use standard HTTPS port
 const PORT = isDevelopment ? '3003' : '443';
 
-export const API_BASE_URL = `${HTTP_PROTOCOL}://${DOMAIN}${isDevelopment ? `:${PORT}` : ''}/api`;
+export const API_BASE_URL = `${HTTP_PROTOCOL}://${DOMAIN}${isDevelopment ? `:${PORT}` : ''}`;
 export const WS_BASE_URL = `${WS_PROTOCOL}://${DOMAIN}${isDevelopment ? `:${PORT}` : ''}`; 
