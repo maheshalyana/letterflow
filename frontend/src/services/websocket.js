@@ -3,7 +3,7 @@
 
 import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
-import { useSelector } from 'react-redux';
+import { WS_BASE_URL } from '../config/api';
 
 class WebSocketService {
     constructor() {

@@ -9,4 +9,4 @@ export const API_BASE_URL = isDevelopment
 
 export const WS_BASE_URL = isDevelopment
     ? 'ws://localhost:3003'
-    : `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`; 
+    : 'ws://13.235.75.86:3003'; 
