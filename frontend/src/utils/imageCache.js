@@ -11,55 +11,33 @@ const CACHE_EXPIRATION = 24 * 60 * 60 * 1000;
  * @returns {Promise<{url: string, isLoaded: boolean}>} - Cached URL and load status
  */
 export const getCachedImage = async (url, fallbackInitial = null) => {
-    // If no URL provided, return null
     if (!url) {
         return { url: null, isLoaded: false };
     }
 
-    // Check if URL is already in cache and not expired
+    // Check if image is already in cache
     if (imageCache.has(url)) {
-        const cachedData = imageCache.get(url);
-
-        // Check if cache is still valid
-        if (Date.now() - cachedData.timestamp < CACHE_EXPIRATION) {
-            return { url: cachedData.dataUrl || url, isLoaded: cachedData.isLoaded };
-        }
-
-        // Cache expired, remove it
-        imageCache.delete(url);
+        return { url, isLoaded: true };
     }
 
-    // Create a new cache entry with default values
-    imageCache.set(url, {
-        dataUrl: null,
-        isLoaded: false,
-        timestamp: Date.now()
-    });
-
-    // Try to fetch and cache the image
+    // Load and cache the image
     try {
-        const response = await fetch(url);
-        const blob = await response.blob();
-        const dataUrl = URL.createObjectURL(blob);
-
-        // Update cache with the data URL
-        imageCache.set(url, {
-            dataUrl,
-            isLoaded: true,
-            timestamp: Date.now()
+        // Create a promise that resolves when the image loads
+        const loadPromise = new Promise((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => {
+                imageCache.set(url, true);
+                resolve({ url, isLoaded: true });
+            };
+            img.onerror = () => {
+                reject({ url, isLoaded: false });
+            };
+            img.src = url;
         });
 
-        return { url: dataUrl, isLoaded: true };
+        return await loadPromise;
     } catch (error) {
-        console.error('Error caching image:', error);
-
-        // Mark as failed in cache but keep original URL
-        imageCache.set(url, {
-            dataUrl: null,
-            isLoaded: false,
-            timestamp: Date.now()
-        });
-
+        console.error('Error loading image:', error);
         return { url, isLoaded: false };
     }
 };
@@ -68,13 +46,6 @@ export const getCachedImage = async (url, fallbackInitial = null) => {
  * Clear the image cache
  */
 export const clearImageCache = () => {
-    // Release object URLs to prevent memory leaks
-    imageCache.forEach(entry => {
-        if (entry.dataUrl && entry.dataUrl.startsWith('blob:')) {
-            URL.revokeObjectURL(entry.dataUrl);
-        }
-    });
-
     imageCache.clear();
 };
 

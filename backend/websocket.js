@@ -9,7 +9,33 @@ const { verifyToken } = require('./middleware/auth');
 const { sequelize } = require('./config/database');
 
 function setupWebSocketServer(server) {
-    const wss = new WebSocket.Server({ noServer: true });
+    const wss = new WebSocket.Server({
+        noServer: true,
+        // Add ping/pong to detect stale connections
+        clientTracking: true,
+        pingInterval: 30000,
+        pingTimeout: 5000
+    });
+
+    // Handle connection errors
+    wss.on('error', (error) => {
+        console.error('WebSocket server error:', error);
+    });
+
+    // Ping/Pong to keep connections alive
+    const interval = setInterval(() => {
+        wss.clients.forEach((ws) => {
+            if (ws.isAlive === false) {
+                return ws.terminate();
+            }
+            ws.isAlive = false;
+            ws.ping();
+        });
+    }, 30000);
+
+    wss.on('close', () => {
+        clearInterval(interval);
+    });
 
     // Track active connections by document ID
     const documentConnections = new Map();

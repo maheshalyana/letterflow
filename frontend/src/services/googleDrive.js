@@ -9,7 +9,7 @@ class GoogleDriveService {
     async initialize() {
         await this.loadGoogleAPI();
         this.tokenClient = google.accounts.oauth2.initTokenClient({
-            client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
+            client_id: "798221185843-1717cf2imhnmite87j4ohl5nfq52k74d.apps.googleusercontent.com",
             scope: 'https://www.googleapis.com/auth/drive.file',
             callback: (response) => {
                 this.accessToken = response.access_token;

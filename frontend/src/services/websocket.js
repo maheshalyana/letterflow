@@ -10,6 +10,9 @@ class WebSocketService {
         this.providers = new Map();
         this.ydocs = new Map();
         this.callbacks = new Map();
+        this.reconnectAttempts = 0;
+        this.maxReconnectAttempts = 5;
+        this.reconnectDelay = 1000; // Start with 1 second
     }
 
     // Connect to a document's WebSocket
@@ -23,10 +26,10 @@ class WebSocketService {
         this.ydocs.set(documentId, ydoc);
 
         // Create WebSocket URL with authentication and user info
-        const wsUrl = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.hostname}:3003/documents`;
+        const url = `${WS_BASE_URL}/documents?documentId=${documentId}&token=${token}`;
 
         // Create WebSocket provider with proper params
-        const provider = new WebsocketProvider(wsUrl, documentId, ydoc, {
+        const provider = new WebsocketProvider(url, documentId, ydoc, {
             params: {
                 token,
                 documentId,
@@ -72,6 +75,27 @@ class WebSocketService {
         });
 
         this.providers.set(documentId, provider);
+
+        this.ws = new WebSocket(url);
+
+        this.ws.onclose = () => {
+            if (this.reconnectAttempts < this.maxReconnectAttempts) {
+                setTimeout(() => {
+                    this.reconnectAttempts++;
+                    this.connect(documentId, token, user);
+                }, this.reconnectDelay * Math.pow(2, this.reconnectAttempts));
+            }
+        };
+
+        this.ws.onerror = (error) => {
+            console.error('WebSocket error:', error);
+        };
+
+        this.ws.onopen = () => {
+            this.reconnectAttempts = 0;
+            this.reconnectDelay = 1000;
+        };
+
         return provider;
     }
 
