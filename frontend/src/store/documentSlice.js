@@ -62,7 +62,6 @@ export const updateDocument = createAsyncThunk(
     async (documentData, { rejectWithValue, getState }) => {
         try {
             const { token } = getState().user;
-            const API_URL = `${API_BASE_URL}/api/documents`;
 
             // Make sure we have the required fields
             if (!documentData.id) {
@@ -74,8 +73,8 @@ export const updateDocument = createAsyncThunk(
             if (documentData.content !== undefined) requestData.content = documentData.content;
             if (documentData.title !== undefined) requestData.title = documentData.title;
 
-            // Send the request
-            const response = await fetch(`${API_URL}/api/documents/${documentData.id}`, {
+            // Fix: Remove duplicate API_URL in the endpoint
+            const response = await fetch(`${API_BASE_URL}/api/documents/${documentData.id}`, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',

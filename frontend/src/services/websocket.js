@@ -7,104 +7,119 @@ import { WS_BASE_URL } from '../config/api';
 
 class WebSocketService {
     constructor() {
-        this.docs = new Map();
         this.providers = new Map();
+        this.ydocs = new Map();
         this.callbacks = new Map();
+        this.reconnectAttempts = 0;
+        this.maxReconnectAttempts = 5;
+        this.reconnectDelay = 1000; // Start with 1 second
     }
 
-    connect(documentId, token, currentUser) {
+    // Connect to a document's WebSocket
+    connect(documentId, token, user) {
         if (this.providers.has(documentId)) {
             return this.providers.get(documentId);
         }
 
-        // Get or create Y.js document
-        const ydoc = this.getYDoc(documentId);
+        // Create a new Y.js document
+        const ydoc = new Y.Doc();
+        this.ydocs.set(documentId, ydoc);
 
-        // Create WebSocket URL with query parameters
-        const wsUrl = new URL('/documents', WS_BASE_URL);
-        wsUrl.searchParams.append('documentId', documentId);
-        wsUrl.searchParams.append('token', token);
-        wsUrl.searchParams.append('userName', currentUser.name || 'Anonymous');
-        wsUrl.searchParams.append('userId', currentUser.uid);
-        wsUrl.searchParams.append('userPicture', currentUser.picture || '');
-        wsUrl.searchParams.append('userColor', this.getRandomColor());
+        // Create WebSocket URL with authentication and user info
+        const url = `${WS_BASE_URL}/documents?documentId=${documentId}&token=${token}`;
 
-        try {
-            // Create WebSocket provider
-            const provider = new WebsocketProvider(
-                WS_BASE_URL,
+        // Create WebSocket provider with proper params
+        const provider = new WebsocketProvider(url, documentId, ydoc, {
+            params: {
+                token,
                 documentId,
-                ydoc,
-                {
-                    WebSocketPolyfill: WebSocket,
-                    awareness: {
-                        user: {
-                            name: currentUser.name || 'Anonymous',
-                            color: this.getRandomColor(),
-                            id: currentUser.uid,
-                            picture: currentUser.picture || '',
-                        }
-                    }
+                userName: user.name || 'Anonymous',
+                userId: user.uid || 'anonymous',
+                userPicture: user.picture || '',
+                userColor: this.getRandomColor()
+            }
+        });
+
+        // Set up awareness (for cursor positions and user info)
+        const awareness = provider.awareness;
+        awareness.setLocalState({
+            name: user.name || 'Anonymous',
+            color: this.getRandomColor(),
+            user: {
+                id: user.uid || 'anonymous',
+                name: user.name || 'Anonymous',
+                picture: user.picture || ''
+            }
+        });
+
+        // Handle messages from the server
+        provider.on('message', (event) => {
+            try {
+                const message = JSON.parse(event.data);
+                if (message.type && this.callbacks.has(message.type)) {
+                    this.callbacks.get(message.type).forEach(callback => callback(message));
                 }
-            );
+            } catch (e) {
+                // Not a JSON message, likely a Y.js protocol message
+            }
+        });
 
-            // Store the provider
-            this.providers.set(documentId, provider);
+        // Handle connection status
+        provider.on('status', (status) => {
+            console.log('Connection status:', status);
+        });
 
-            // Log connection status changes
-            provider.awareness.on('change', () => {
-                console.log('Awareness change');
-            });
+        // Handle sync status
+        provider.on('sync', (isSynced) => {
+            console.log('Sync status:', isSynced ? 'synced' : 'not synced');
+        });
 
-            provider.ws.addEventListener('open', () => {
-                console.log('WebSocket connected successfully');
-            });
+        this.providers.set(documentId, provider);
 
-            provider.ws.addEventListener('error', (error) => {
-                console.error('WebSocket error:', error);
-            });
+        this.ws = new WebSocket(url);
 
-            provider.ws.addEventListener('close', () => {
-                console.log('WebSocket connection closed');
-            });
+        this.ws.onclose = () => {
+            if (this.reconnectAttempts < this.maxReconnectAttempts) {
+                setTimeout(() => {
+                    this.reconnectAttempts++;
+                    this.connect(documentId, token, user);
+                }, this.reconnectDelay * Math.pow(2, this.reconnectAttempts));
+            }
+        };
 
-            return provider;
-        } catch (error) {
-            console.error('Error creating WebSocket provider:', error);
-            throw error;
-        }
+        this.ws.onerror = (error) => {
+            console.error('WebSocket error:', error);
+        };
+
+        this.ws.onopen = () => {
+            this.reconnectAttempts = 0;
+            this.reconnectDelay = 1000;
+        };
+
+        return provider;
     }
 
+    // Disconnect from a document's WebSocket
     disconnect(documentId) {
         const provider = this.providers.get(documentId);
         if (provider) {
-            try {
-                provider.awareness?.destroy();
-                provider.ws?.close();
-                provider.destroy();
-                this.providers.delete(documentId);
-            } catch (error) {
-                console.error('Error during disconnect:', error);
-            }
-        }
-        const doc = this.docs.get(documentId);
-        if (doc) {
-            try {
-                doc.destroy();
-                this.docs.delete(documentId);
-            } catch (error) {
-                console.error('Error destroying doc:', error);
+            provider.disconnect();
+            this.providers.delete(documentId);
+
+            const ydoc = this.ydocs.get(documentId);
+            if (ydoc) {
+                ydoc.destroy();
+                this.ydocs.delete(documentId);
             }
         }
     }
 
+    // Get a Y.js document
     getYDoc(documentId) {
-        if (!this.docs.has(documentId)) {
-            this.docs.set(documentId, new Y.Doc());
-        }
-        return this.docs.get(documentId);
+        return this.ydocs.get(documentId);
     }
 
+    // Subscribe to a message type
     subscribe(type, callback) {
         if (!this.callbacks.has(type)) {
             this.callbacks.set(type, new Set());
@@ -122,10 +137,13 @@ class WebSocketService {
         };
     }
 
+    // Generate a random color for user cursors
     getRandomColor() {
         const colors = [
-            '#2ecc71', '#3498db', '#9b59b6', '#f1c40f', '#e67e22',
-            '#e74c3c', '#1abc9c', '#34495e', '#16a085', '#27ae60'
+            '#f44336', '#e91e63', '#9c27b0', '#673ab7',
+            '#3f51b5', '#2196f3', '#03a9f4', '#00bcd4',
+            '#009688', '#4caf50', '#8bc34a', '#cddc39',
+            '#ffc107', '#ff9800', '#ff5722'
         ];
         return colors[Math.floor(Math.random() * colors.length)];
     }

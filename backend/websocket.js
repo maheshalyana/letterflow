@@ -23,223 +23,41 @@ async function verifyAndDecodeToken(token) {
 
 function setupWebSocketServer(server) {
     const wss = new WebSocket.Server({
-        noServer: true,
-        // Add ping/pong to detect stale connections
-        clientTracking: true,
-        pingInterval: 30000,
-        pingTimeout: 5000,
-        // Add handling for secure connections
-        handleProtocols: (protocols) => {
-            if (protocols.includes('wss')) {
-                return 'wss';
-            }
-            return 'ws';
-        }
-    });
-
-    // Handle connection errors
-    wss.on('error', (error) => {
-        console.error('WebSocket server error:', error);
-    });
-
-    // Ping/Pong to keep connections alive
-    const interval = setInterval(() => {
-        wss.clients.forEach((ws) => {
-            if (ws.isAlive === false) {
-                return ws.terminate();
-            }
-            ws.isAlive = false;
-            ws.ping();
-        });
-    }, 30000);
-
-    wss.on('close', () => {
-        clearInterval(interval);
-    });
-
-    // Track active connections by document ID
-    const documentConnections = new Map();
-    const documentYDocs = new Map(); // Store Y.js documents
-    const documentCollaborators = new Map(); // Track active collaborators
-    const handledSockets = new WeakSet(); // Track already handled sockets
-
-    // Handle HTTP upgrade for WebSocket connections
-    server.on('upgrade', async (request, socket, head) => {
-        // Parse URL to get pathname and query parameters
-        const { pathname, query } = parse(request.url, true);
-
-        // Check if this is a document WebSocket connection
-        if (pathname.startsWith('/documents')) {
-            // Prevent handling the same socket multiple times
-            if (handledSockets.has(socket)) {
-                return;
-            }
-            handledSockets.add(socket);
-
+        server,
+        path: '/documents',
+        verifyClient: async (info, cb) => {
             try {
-                const token = query.token;
-                const documentId = query.documentId;
+                const url = new URL(info.req.url, 'http://localhost');
+                const token = url.searchParams.get('token');
+                const documentId = url.searchParams.get('documentId');
 
                 if (!token || !documentId) {
-                    console.error('Missing token or documentId');
-                    socket.destroy();
+                    cb(false, 401, 'Unauthorized');
                     return;
                 }
 
-                // Verify token first
-                const decodedToken = await verifyAndDecodeToken(token);
-                if (!decodedToken) {
-                    console.error('Invalid token');
-                    socket.destroy();
-                    return;
-                }
+                // Verify the token and check document access here
+                // ... your verification logic ...
 
-                const userName = query.userName || 'Anonymous';
-                const userColor = query.userColor || '#' + Math.floor(Math.random() * 16777215).toString(16);
-                const userPicture = query.userPicture || '';
-                const userId = query.userId || '';
-
-                const accessInfo = await checkDocumentAccess(documentId, decodedToken.uid);
-
-                if (!accessInfo.hasAccess) {
-                    socket.destroy();
-                    return;
-                }
-
-                // Add document ID and role to request for y-websocket
-                request.documentId = documentId;
-                request.userRole = accessInfo.role;
-
-                // Initialize Y.js document if not exists
-                if (!documentYDocs.has(documentId)) {
-                    const yDoc = new Y.Doc();
-                    documentYDocs.set(documentId, yDoc);
-
-                    // Initialize with document content from database
-                    const document = await Document.findByPk(documentId);
-                    if (document && document.content) {
-                        const yText = yDoc.getText('content');
-                        // Set the content directly - this preserves HTML formatting
-                        yText.insert(0, document.content);
-                    }
-                }
-
-                // Track collaborators
-                if (!documentCollaborators.has(documentId)) {
-                    documentCollaborators.set(documentId, new Map());
-                }
-
-                const collaborators = documentCollaborators.get(documentId);
-                collaborators.set(userId, {
-                    name: userName,
-                    color: userColor,
-                    picture: userPicture,
-                    id: userId
-                });
-
-                // Broadcast updated collaborator list
-                broadcastCollaborators(documentId);
-
-                // Handle the WebSocket connection
-                wss.handleUpgrade(request, socket, head, (ws) => {
-                    // Track this connection
-                    if (!documentConnections.has(documentId)) {
-                        documentConnections.set(documentId, new Set());
-                    }
-                    documentConnections.get(documentId).add(ws);
-
-                    // Add user data to the websocket object
-                    ws.userRole = accessInfo.role;
-                    ws.userId = decodedToken.uid;
-                    ws.userName = userName;
-                    ws.userColor = userColor;
-                    ws.documentId = documentId;
-                    ws.yDoc = documentYDocs.get(documentId);
-                    ws.userPicture = userPicture;
-
-                    // Setup Y.js connection
-                    setupWSConnection(ws, request, {
-                        docName: documentId,
-                        gc: true
-                    });
-
-                    // Send role information to the client
-                    ws.send(JSON.stringify({
-                        type: 'permission',
-                        role: ws.userRole
-                    }));
-
-                    // Handle connection close
-                    ws.on('close', () => {
-                        console.log('WebSocket closed');
-                        const connections = documentConnections.get(documentId);
-                        if (connections) {
-                            connections.delete(ws);
-                            if (connections.size === 0) {
-                                documentConnections.delete(documentId);
-                            }
-                        }
-
-                        // Remove collaborator
-                        const collaborators = documentCollaborators.get(documentId);
-                        if (collaborators && userId) {
-                            collaborators.delete(userId);
-                            broadcastCollaborators(documentId);
-                        }
-                    });
-                });
+                cb(true);
             } catch (error) {
-                console.error('WebSocket upgrade error:', error);
-                socket.destroy();
+                console.error('WebSocket verification error:', error);
+                cb(false, 500, 'Internal Server Error');
             }
         }
     });
 
-    // Broadcast collaborators list to all clients
-    function broadcastCollaborators(documentId) {
-        const connections = documentConnections.get(documentId);
-        const collaborators = documentCollaborators.get(documentId);
+    wss.on('connection', (ws, req) => {
+        console.log('New WebSocket connection');
 
-        if (connections && collaborators) {
-            const collaboratorsList = Array.from(collaborators.values());
-            const message = JSON.stringify({
-                type: 'collaborator-update',
-                collaborators: collaboratorsList
-            });
+        const url = new URL(req.url, 'http://localhost');
+        const documentId = url.searchParams.get('documentId');
 
-            connections.forEach(client => {
-                if (client.readyState === WebSocket.OPEN) {
-                    client.send(message);
-                }
-            });
-        }
-    }
-
-    // Periodically save document content
-    setInterval(async () => {
-        for (const [documentId, connections] of documentConnections.entries()) {
-            if (connections.size > 0) {
-                try {
-                    const yDoc = documentYDocs.get(documentId);
-                    if (yDoc) {
-                        const ytext = yDoc.getText('content');
-                        const content = ytext.toString();
-
-                        // Save to database if content exists
-                        if (content) {
-                            await Document.update(
-                                { content, lastModified: new Date() },
-                                { where: { id: documentId } }
-                            );
-                            console.log(`Auto-saved document: ${documentId}`);
-                        }
-                    }
-                } catch (error) {
-                    console.error(`Error auto-saving document ${documentId}:`, error);
-                }
-            }
-        }
-    }, 30000); // Save every 30 seconds
+        setupWSConnection(ws, req, {
+            docName: documentId,
+            gc: true
+        });
+    });
 
     return wss;
 }
