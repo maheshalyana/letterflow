@@ -109,7 +109,15 @@ app.use('/api/documents', documentsRouter);
 
 // Initialize database and start server
 const PORT = process.env.PORT || 3003;
-server.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-    console.log('Database synced');
-});
+
+// Sync database models before starting the server
+sequelize.sync({ alter: true })
+    .then(() => {
+        server.listen(PORT, () => {
+            console.log(`Server running on port ${PORT}`);
+            console.log('Database synced');
+        });
+    })
+    .catch(err => {
+        console.error('Unable to sync database:', err);
+    });

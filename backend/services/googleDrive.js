@@ -1,6 +1,6 @@
 const { google } = require('googleapis');
 const { OAuth2Client } = require('google-auth-library');
-const pdf = require('html-pdf');
+const HTMLToDocx = require('html-to-docx');
 const { Readable } = require('stream');
 
 class GoogleDriveService {
@@ -12,27 +12,19 @@ class GoogleDriveService {
         this.drive = google.drive({ version: 'v3', auth: this.oauth2Client });
     }
 
-    // Convert HTML to PDF buffer
-    async convertHtmlToPdf(htmlContent) {
-        const options = {
-            format: 'A4',
-            border: {
-                top: '20px',
-                right: '20px',
-                bottom: '20px',
-                left: '20px'
-            },
-        };
-
-        return new Promise((resolve, reject) => {
-            pdf.create(htmlContent, options).toBuffer((err, buffer) => {
-                if (err) {
-                    reject(err);
-                    return;
-                }
-                resolve(buffer);
+    // Convert HTML to DOCX buffer
+    async convertHtmlToDocx(htmlContent) {
+        try {
+            const buffer = await HTMLToDocx(htmlContent, null, {
+                table: { row: { cantSplit: true } },
+                footer: false,
+                pageNumber: false
             });
-        });
+            return buffer;
+        } catch (error) {
+            console.error('Error converting HTML to DOCX:', error);
+            throw error;
+        }
     }
 
     // Convert buffer to readable stream
@@ -80,21 +72,21 @@ class GoogleDriveService {
         try {
             this.oauth2Client.setCredentials({ access_token: accessToken });
 
-            // Convert HTML to PDF
-            const pdfBuffer = await this.convertHtmlToPdf(htmlContent);
+            // Convert HTML to DOCX
+            const docxBuffer = await this.convertHtmlToDocx(htmlContent);
 
             // Get or create the letterflow folder
             const folderId = await this.findOrCreateFolder(accessToken);
 
             const response = await this.drive.files.create({
                 requestBody: {
-                    name: `${title}.pdf`,
-                    mimeType: 'application/pdf',
+                    name: `${title}.docx`,
+                    mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
                     parents: [folderId]
                 },
                 media: {
-                    mimeType: 'application/pdf',
-                    body: this.bufferToStream(pdfBuffer)
+                    mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                    body: this.bufferToStream(docxBuffer)
                 },
                 fields: 'id, webViewLink'
             });
@@ -113,18 +105,18 @@ class GoogleDriveService {
         try {
             this.oauth2Client.setCredentials({ access_token: accessToken });
 
-            // Convert HTML to PDF
-            const pdfBuffer = await this.convertHtmlToPdf(htmlContent);
+            // Convert HTML to DOCX
+            const docxBuffer = await this.convertHtmlToDocx(htmlContent);
 
             // Update file metadata and content
             const response = await this.drive.files.update({
                 fileId: fileId,
                 requestBody: {
-                    name: `${title}.pdf`
+                    name: `${title}.docx`
                 },
                 media: {
-                    mimeType: 'application/pdf',
-                    body: this.bufferToStream(pdfBuffer)
+                    mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                    body: this.bufferToStream(docxBuffer)
                 },
                 fields: 'id, webViewLink'
             });
@@ -164,4 +156,4 @@ class GoogleDriveService {
     }
 }
 
-module.exports = new GoogleDriveService(); 
+module.exports = new GoogleDriveService();

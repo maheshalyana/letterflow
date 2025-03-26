@@ -6,13 +6,18 @@ import Italic from "@tiptap/extension-italic";
 import Link from "@tiptap/extension-link";
 import Underline from "@tiptap/extension-underline";
 import Placeholder from '@tiptap/extension-placeholder';
+import Collaboration from '@tiptap/extension-collaboration';
+import CollaborationCursor from '@tiptap/extension-collaboration-cursor';
 import {
     RiBold, RiItalic, RiUnderline, RiLinkM, RiH1, RiH2, RiText,
-    RiListUnordered, RiListOrdered, RiDoubleQuotesR
+    RiListUnordered, RiListOrdered, RiDoubleQuotesR, RiDriveFill
 } from 'react-icons/ri';
 import SlashCommandMenu from './SlashCommandMenu';
 import { useSelector } from 'react-redux';
 import { debounce } from '../utils/helpers';
+import websocketService from '../services/websocket';
+import googleDriveService from '../services/googleDrive';
+import { toast } from 'react-toastify';
 
 const MenuButton = ({ isActive, onClick, children, tooltip }) => (
     <button
@@ -26,17 +31,102 @@ const MenuButton = ({ isActive, onClick, children, tooltip }) => (
 );
 
 const TextEditor = ({ onContentChange, currentDocument }) => {
-    const { currentUser } = useSelector(state => state.user);
+    // Guard clause - if no document is provided, don't try to render the editor
+    if (!currentDocument) {
+        return (
+            <div className="flex items-center justify-center h-[calc(100vh-8rem)]">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+            </div>
+        );
+    }
+
+    const { currentUser, token } = useSelector(state => state.user);
+
+    // Check if current user is the owner
+    const isOwner = currentDocument?.userId === currentUser?.uid;
+
+    // Check if current user has edit permission
+    const userShare = currentDocument?.sharedWith?.find(user => user.uid === currentUser?.uid);
+    console.log('User share:', userShare, currentDocument);
+    const canEdit = isOwner || userShare?.DocumentShare?.role === 'editor';
+
     const [isSlashMenuOpen, setIsSlashMenuOpen] = useState(false);
     const [slashMenuPosition, setSlashMenuPosition] = useState({ top: 0, left: 0 });
+    const [provider, setProvider] = useState(null);
+    const [ydoc, setYdoc] = useState(null);
+    const [isCollaborationReady, setIsCollaborationReady] = useState(false);
+    const [isSavingToDrive, setIsSavingToDrive] = useState(false);
 
     // Create debounced save function
     const debouncedContentChange = useRef(
         debounce((content) => {
-            console.log("Saving content:", content.substring(0, 30) + "...");
             onContentChange(content);
         }, 1000)
     ).current;
+
+    // Handle save to Google Drive
+    const handleSaveToDrive = async () => {
+        if (!currentDocument?.id) return;
+
+        try {
+            setIsSavingToDrive(true);
+            const result = await googleDriveService.saveDocument(currentDocument.id);
+            toast.success('Document saved to Google Drive!');
+            console.log('Saved to Drive:', result);
+        } catch (error) {
+            console.error('Error saving to Drive:', error);
+            toast.error('Failed to save to Google Drive');
+        } finally {
+            setIsSavingToDrive(false);
+        }
+    };
+
+    // Initialize Y.js document and provider
+    useEffect(() => {
+        if (!currentDocument?.id || !currentUser || !token) return;
+
+        try {
+            // Connect to WebSocket
+            const newProvider = websocketService.connect(
+                currentDocument.id,
+                token,
+                currentUser
+            );
+
+            const newYdoc = websocketService.getYDoc(currentDocument.id);
+
+            // Set initial content in Y.js document if it's empty
+            const ytext = newYdoc.getText('content');
+            if (ytext.toString() === '' && currentDocument.content) {
+                // Only set content if Y.js document is empty
+                ytext.insert(0, currentDocument.content);
+            }
+
+            setProvider(newProvider);
+            setYdoc(newYdoc);
+
+            // Mark collaboration as ready after a short delay to ensure sync
+            setTimeout(() => {
+                setIsCollaborationReady(true);
+            }, 500);
+        } catch (error) {
+            console.error("Error initializing collaboration:", error);
+            // Fall back to non-collaborative mode
+            setYdoc(null);
+            setProvider(null);
+        }
+
+        return () => {
+            if (currentDocument?.id) {
+                try {
+                    websocketService.disconnect(currentDocument.id);
+                } catch (error) {
+                    console.error("Error disconnecting:", error);
+                }
+                setIsCollaborationReady(false);
+            }
+        };
+    }, [currentDocument?.id, currentUser, token]);
 
     const editor = useEditor({
         extensions: [
@@ -48,19 +138,32 @@ const TextEditor = ({ onContentChange, currentDocument }) => {
             Link.configure({ openOnClick: false }),
             Underline,
             Placeholder.configure({
-                placeholder: 'Type "/" for commands or start typing...',
-                emptyEditorClass: 'is-editor-empty',
+                placeholder: 'Start typing or use "/" for commands...',
             }),
+            // Only add collaboration extensions if ydoc is available
+            ...(ydoc ? [
+                Collaboration.configure({
+                    document: ydoc,
+                }),
+                CollaborationCursor.configure({
+                    provider,
+                    user: {
+                        name: currentUser?.name || 'Anonymous',
+                        color: websocketService.getRandomColor(),
+                        id: currentUser?.uid,
+                        picture: currentUser?.picture || '',
+                    },
+                })
+            ] : []),
         ],
-        content: currentDocument?.content || '',
+        content: currentDocument.content || '',
         onUpdate: ({ editor }) => {
-            const content = editor.getHTML();
-            console.log("Content changed:", content.substring(0, 50) + "...");
-            if (content !== currentDocument?.content) {
-                console.log("Saving content to backend for document:", currentDocument?.id);
-                debouncedContentChange(content);
+            if (canEdit) {
+                const html = editor.getHTML();
+                debouncedContentChange(html);
             }
         },
+        editable: canEdit,
         onKeyDown: ({ event }) => {
             if (event.key === '/' && !isSlashMenuOpen) {
                 const { view } = editor;
@@ -76,14 +179,14 @@ const TextEditor = ({ onContentChange, currentDocument }) => {
                 setIsSlashMenuOpen(true);
             }
         },
-    }, [currentDocument?.id]);
+    }, [provider, ydoc, currentDocument?.id, canEdit]);
 
-    // Update editor content when document changes
+    // Update editor content when document changes and we're not using collaboration
     useEffect(() => {
-        if (editor && currentDocument) {
+        if (editor && currentDocument && !ydoc && !isCollaborationReady) {
             editor.commands.setContent(currentDocument.content || '');
         }
-    }, [editor, currentDocument]);
+    }, [editor, currentDocument, ydoc, isCollaborationReady]);
 
     if (!editor) {
         return (
@@ -94,106 +197,134 @@ const TextEditor = ({ onContentChange, currentDocument }) => {
     }
 
     return (
-        <div className="min-h-screen bg-white">
-            <div className="sticky top-14 bg-white border-b z-20">
-                <div className="px-4 py-1">
-                    <div className="flex items-center gap-1">
-                        <MenuButton
-                            onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
-                            isActive={editor.isActive('heading', { level: 1 })}
-                            tooltip="Heading 1"
-                        >
-                            <RiH1 className="w-4 h-4" />
-                        </MenuButton>
+        <div className="flex flex-col h-full">
+            <div className="border-b">
+                <div className="max-w-3xl mx-auto">
+                    {canEdit ? (
+                        <div className="flex items-center justify-between p-2">
+                            <div className="flex items-center space-x-1">
+                                <MenuButton
+                                    onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
+                                    isActive={editor.isActive('heading', { level: 1 })}
+                                    tooltip="Heading 1"
+                                >
+                                    <RiH1 className="w-4 h-4" />
+                                </MenuButton>
 
-                        <MenuButton
-                            onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
-                            isActive={editor.isActive('heading', { level: 2 })}
-                            tooltip="Heading 2"
-                        >
-                            <RiH2 className="w-4 h-4" />
-                        </MenuButton>
+                                <MenuButton
+                                    onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
+                                    isActive={editor.isActive('heading', { level: 2 })}
+                                    tooltip="Heading 2"
+                                >
+                                    <RiH2 className="w-4 h-4" />
+                                </MenuButton>
 
-                        <MenuButton
-                            onClick={() => editor.chain().focus().setParagraph().run()}
-                            isActive={editor.isActive('paragraph')}
-                            tooltip="Text"
-                        >
-                            <RiText className="w-4 h-4" />
-                        </MenuButton>
+                                <MenuButton
+                                    onClick={() => editor.chain().focus().setParagraph().run()}
+                                    isActive={editor.isActive('paragraph')}
+                                    tooltip="Text"
+                                >
+                                    <RiText className="w-4 h-4" />
+                                </MenuButton>
 
-                        <div className="w-px h-5 bg-gray-200 mx-1" />
+                                <div className="w-px h-5 bg-gray-200 mx-1" />
 
-                        <MenuButton
-                            onClick={() => editor.chain().focus().toggleBold().run()}
-                            isActive={editor.isActive('bold')}
-                            tooltip="Bold"
-                        >
-                            <RiBold className="w-4 h-4" />
-                        </MenuButton>
+                                <MenuButton
+                                    onClick={() => editor.chain().focus().toggleBold().run()}
+                                    isActive={editor.isActive('bold')}
+                                    tooltip="Bold"
+                                >
+                                    <RiBold className="w-4 h-4" />
+                                </MenuButton>
 
-                        <MenuButton
-                            onClick={() => editor.chain().focus().toggleItalic().run()}
-                            isActive={editor.isActive('italic')}
-                            tooltip="Italic"
-                        >
-                            <RiItalic className="w-4 h-4" />
-                        </MenuButton>
+                                <MenuButton
+                                    onClick={() => editor.chain().focus().toggleItalic().run()}
+                                    isActive={editor.isActive('italic')}
+                                    tooltip="Italic"
+                                >
+                                    <RiItalic className="w-4 h-4" />
+                                </MenuButton>
 
-                        <MenuButton
-                            onClick={() => editor.chain().focus().toggleUnderline().run()}
-                            isActive={editor.isActive('underline')}
-                            tooltip="Underline"
-                        >
-                            <RiUnderline className="w-4 h-4" />
-                        </MenuButton>
+                                <MenuButton
+                                    onClick={() => editor.chain().focus().toggleUnderline().run()}
+                                    isActive={editor.isActive('underline')}
+                                    tooltip="Underline"
+                                >
+                                    <RiUnderline className="w-4 h-4" />
+                                </MenuButton>
 
-                        <div className="w-px h-5 bg-gray-200 mx-1" />
+                                <div className="w-px h-5 bg-gray-200 mx-1" />
 
-                        <MenuButton
-                            onClick={() => editor.chain().focus().toggleBulletList().run()}
-                            isActive={editor.isActive('bulletList')}
-                            tooltip="Bullet List"
-                        >
-                            <RiListUnordered className="w-4 h-4" />
-                        </MenuButton>
+                                <MenuButton
+                                    onClick={() => editor.chain().focus().toggleBulletList().run()}
+                                    isActive={editor.isActive('bulletList')}
+                                    tooltip="Bullet List"
+                                >
+                                    <RiListUnordered className="w-4 h-4" />
+                                </MenuButton>
 
-                        <MenuButton
-                            onClick={() => editor.chain().focus().toggleOrderedList().run()}
-                            isActive={editor.isActive('orderedList')}
-                            tooltip="Numbered List"
-                        >
-                            <RiListOrdered className="w-4 h-4" />
-                        </MenuButton>
+                                <MenuButton
+                                    onClick={() => editor.chain().focus().toggleOrderedList().run()}
+                                    isActive={editor.isActive('orderedList')}
+                                    tooltip="Numbered List"
+                                >
+                                    <RiListOrdered className="w-4 h-4" />
+                                </MenuButton>
 
-                        <MenuButton
-                            onClick={() => editor.chain().focus().toggleBlockquote().run()}
-                            isActive={editor.isActive('blockquote')}
-                            tooltip="Quote"
-                        >
-                            <RiDoubleQuotesR className="w-4 h-4" />
-                        </MenuButton>
+                                <MenuButton
+                                    onClick={() => editor.chain().focus().toggleBlockquote().run()}
+                                    isActive={editor.isActive('blockquote')}
+                                    tooltip="Quote"
+                                >
+                                    <RiDoubleQuotesR className="w-4 h-4" />
+                                </MenuButton>
 
-                        <div className="w-px h-5 bg-gray-200 mx-1" />
+                                <div className="w-px h-5 bg-gray-200 mx-1" />
 
-                        <MenuButton
-                            onClick={() => {
-                                const url = window.prompt('Enter URL:');
-                                if (url) {
-                                    editor.chain().focus().setLink({ href: url }).run();
-                                }
-                            }}
-                            isActive={editor.isActive('link')}
-                            tooltip="Add Link"
-                        >
-                            <RiLinkM className="w-4 h-4" />
-                        </MenuButton>
-                    </div>
+                                <MenuButton
+                                    onClick={() => {
+                                        const url = window.prompt('Enter URL:');
+                                        if (url) {
+                                            editor.chain().focus().setLink({ href: url }).run();
+                                        }
+                                    }}
+                                    isActive={editor.isActive('link')}
+                                    tooltip="Add Link"
+                                >
+                                    <RiLinkM className="w-4 h-4" />
+                                </MenuButton>
+                            </div>
+
+                            {/* Save to Drive Button */}
+                            <button
+                                onClick={handleSaveToDrive}
+                                disabled={isSavingToDrive}
+                                className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                                title="Save to Google Drive"
+                            >
+                                {isSavingToDrive ? (
+                                    <>
+                                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                                        <span>Saving...</span>
+                                    </>
+                                ) : (
+                                    <>
+                                        <RiDriveFill className="w-4 h-4" />
+                                        <span>Save to Drive</span>
+                                    </>
+                                )}
+                            </button>
+                        </div>
+                    ) : (
+                        <div className="p-2 bg-gray-100 text-gray-700 text-sm">
+                            You are viewing this document in read-only mode
+                        </div>
+                    )}
                 </div>
             </div>
 
             <div className="py-4">
-                <div className="max-w-3xl mx-auto px-8">
+                <div className="max-w-3xl mx-auto px-8 shadow-md rounded-lg py-2">
                     <EditorContent
                         editor={editor}
                         className="min-h-[calc(100vh-8rem)] prose prose-lg max-w-none"

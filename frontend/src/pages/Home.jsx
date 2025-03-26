@@ -3,7 +3,8 @@ import DocumentList from '../components/DocumentList';
 import TextEditor from '../components/TextEditor';
 import {
     RiMenuLine, RiCloseLine, RiSearchLine, RiAddLine,
-    RiHistoryLine, RiShareLine, RiMoreLine, RiSaveLine, RiDriveFill
+    RiHistoryLine, RiShareLine, RiMoreLine, RiSaveLine, RiDriveFill,
+    RiLogoutBoxLine
 } from 'react-icons/ri';
 import { useDispatch, useSelector } from 'react-redux';
 import { createDocument, updateDocument, fetchDocuments, setCurrentDocument } from '../store/documentSlice';
@@ -14,7 +15,7 @@ import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import DocumentHeader from '../components/DocumentHeader';
 import websocketService from '../services/websocket';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 
 const Home = () => {
     const [selectedDocument, setSelectedDocument] = useState(null);
@@ -25,15 +26,23 @@ const Home = () => {
     const [lastSaved, setLastSaved] = useState(null);
     const menuRef = useRef(null);
     const dispatch = useDispatch();
+    const navigate = useNavigate();
     const { currentUser } = useSelector(state => state.user);
     const updateTimeout = useRef(null);
     const [collaborators, setCollaborators] = useState([]);
     const { id } = useParams();
     const { items: documents, currentDocument } = useSelector(state => state.documents);
 
+    const handleLogout = () => {
+        dispatch(clearUser());
+        localStorage.removeItem('token');
+        navigate('/login');
+    };
+
     // Fetch documents on mount
     useEffect(() => {
         dispatch(fetchDocuments());
+        console.log('Documents:', documents);
     }, [dispatch]);
 
     // Set current document when id changes or documents load
@@ -105,9 +114,35 @@ const Home = () => {
         }
     }, [selectedDocument]);
 
+    const handleSaveToDrive = async () => {
+        if (!currentDocument?.id) return;
 
+        try {
+            setIsMenuOpen(false);
+            const result = await googleDriveService.saveDocument(currentDocument.id);
+            toast.success('Document saved to Google Drive!');
+            console.log('Saved to Drive:', result);
+        } catch (error) {
+            console.error('Error saving to Drive:', error);
+            toast.error('Failed to save to Google Drive');
+        }
+    };
 
-    if (!currentDocument) return null;
+    // Create a new document function
+    const handleCreateNewDocument = () => {
+        dispatch(createDocument({ title: 'Untitled', content: '' }))
+            .unwrap()
+            .then((newDoc) => {
+                dispatch(setCurrentDocument(newDoc));
+                toast.success('New document created!');
+            })
+            .catch((error) => {
+                toast.error(`Failed to create document: ${error}`);
+            });
+    };
+
+    // Check if documents are loaded but empty
+    const noDocuments = Array.isArray(documents) && documents.length === 0;
 
     return (
         <div className="h-screen flex bg-gray-50">
@@ -126,6 +161,13 @@ const Home = () => {
                     } md:translate-x-0 md:w-80`}
             >
                 <div className="h-full flex flex-col">
+                    {/* Logo */}
+                    <div className="flex-shrink-0 p-4 border-b">
+                        <div className="flex items-center justify-start">
+                            <span className="ml-2 text-xl font-bold text-gray-800">LetterFlow</span>
+                        </div>
+                    </div>
+
                     {/* Fixed Header */}
                     <div className="flex-shrink-0 border-b bg-white p-4">
                         {/* Search Bar */}
@@ -169,6 +211,13 @@ const Home = () => {
                                 <h2 className="font-medium truncate">{currentUser?.name}</h2>
                                 <p className="text-sm text-gray-500 truncate">{currentUser?.email}</p>
                             </div>
+                            <button
+                                onClick={handleLogout}
+                                className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg"
+                                title="Logout"
+                            >
+                                <RiLogoutBoxLine className="w-5 h-5" />
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -189,7 +238,25 @@ const Home = () => {
                     )}
                 </button>
 
-                {currentDocument && (
+                {noDocuments ? (
+                    // Welcome screen when no documents exist
+                    <div className="h-full flex flex-col items-center justify-center p-8">
+                        <div className="max-w-md text-center">
+                            <h1 className="text-3xl font-bold text-gray-800 mb-4">Welcome to LetterFlow!</h1>
+                            <p className="text-gray-600 mb-8">
+                                Get started by creating your first document. You can write, edit, and collaborate in real-time.
+                            </p>
+                            <button
+                                onClick={handleCreateNewDocument}
+                                className="flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors mx-auto"
+                            >
+                                <RiAddLine className="w-5 h-5" />
+                                <span>Create Your First Document</span>
+                            </button>
+                        </div>
+                    </div>
+                ) : currentDocument ? (
+                    // Show document if one is selected
                     <>
                         <DocumentHeader
                             document={currentDocument}
@@ -204,6 +271,11 @@ const Home = () => {
                             onContentChange={handleContentChange}
                         />
                     </>
+                ) : (
+                    // Loading state
+                    <div className="h-full flex items-center justify-center">
+                        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+                    </div>
                 )}
             </div>
         </div>

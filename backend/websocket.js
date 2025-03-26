@@ -1,15 +1,20 @@
 const WebSocket = require('ws');
 const { parse } = require('url');
 const admin = require('firebase-admin');
-const { Document, User } = require('./models');
+const { Document, User, DocumentShare } = require('./models');
+const { Op } = require('sequelize');
+const Y = require('yjs');
 const { setupWSConnection } = require('y-websocket/bin/utils');
 const { verifyToken } = require('./middleware/auth');
+const { sequelize } = require('./config/database');
 
 function setupWebSocketServer(server) {
     const wss = new WebSocket.Server({ noServer: true });
 
     // Track active connections by document ID
     const documentConnections = new Map();
+    const documentYDocs = new Map(); // Store Y.js documents
+    const documentCollaborators = new Map(); // Track active collaborators
     const handledSockets = new WeakSet(); // Track already handled sockets
 
     // Handle HTTP upgrade for WebSocket connections
@@ -28,6 +33,10 @@ function setupWebSocketServer(server) {
             try {
                 const token = query.token;
                 const documentId = query.documentId;
+                const userName = query.userName || 'Anonymous';
+                const userColor = query.userColor || '#' + Math.floor(Math.random() * 16777215).toString(16);
+                const userPicture = query.userPicture || '';
+                const userId = query.userId || '';
 
                 if (!token || !documentId) {
                     socket.destroy();
@@ -36,15 +45,46 @@ function setupWebSocketServer(server) {
 
                 // Verify token and document access
                 const decodedToken = await admin.auth().verifyIdToken(token);
-                const hasAccess = await checkDocumentAccess(documentId, decodedToken.uid);
+                const accessInfo = await checkDocumentAccess(documentId, decodedToken.uid);
 
-                if (!hasAccess) {
+                if (!accessInfo.hasAccess) {
                     socket.destroy();
                     return;
                 }
 
-                // Add document ID to request for y-websocket
+                // Add document ID and role to request for y-websocket
                 request.documentId = documentId;
+                request.userRole = accessInfo.role;
+
+                // Initialize Y.js document if not exists
+                if (!documentYDocs.has(documentId)) {
+                    const yDoc = new Y.Doc();
+                    documentYDocs.set(documentId, yDoc);
+
+                    // Initialize with document content from database
+                    const document = await Document.findByPk(documentId);
+                    if (document && document.content) {
+                        const yText = yDoc.getText('content');
+                        // Set the content directly - this preserves HTML formatting
+                        yText.insert(0, document.content);
+                    }
+                }
+
+                // Track collaborators
+                if (!documentCollaborators.has(documentId)) {
+                    documentCollaborators.set(documentId, new Map());
+                }
+
+                const collaborators = documentCollaborators.get(documentId);
+                collaborators.set(userId, {
+                    name: userName,
+                    color: userColor,
+                    picture: userPicture,
+                    id: userId
+                });
+
+                // Broadcast updated collaborator list
+                broadcastCollaborators(documentId);
 
                 // Handle the WebSocket connection
                 wss.handleUpgrade(request, socket, head, (ws) => {
@@ -54,11 +94,30 @@ function setupWebSocketServer(server) {
                     }
                     documentConnections.get(documentId).add(ws);
 
+                    // Add user data to the websocket object
+                    ws.userRole = accessInfo.role;
+                    ws.userId = decodedToken.uid;
+                    ws.userName = userName;
+                    ws.userColor = userColor;
+                    ws.documentId = documentId;
+                    ws.yDoc = documentYDocs.get(documentId);
+                    ws.userPicture = userPicture;
+
                     // Setup Y.js connection
-                    setupWSConnection(ws, request);
+                    setupWSConnection(ws, request, {
+                        docName: documentId,
+                        gc: true
+                    });
+
+                    // Send role information to the client
+                    ws.send(JSON.stringify({
+                        type: 'permission',
+                        role: ws.userRole
+                    }));
 
                     // Handle connection close
                     ws.on('close', () => {
+                        console.log('WebSocket closed');
                         const connections = documentConnections.get(documentId);
                         if (connections) {
                             connections.delete(ws);
@@ -66,24 +125,50 @@ function setupWebSocketServer(server) {
                                 documentConnections.delete(documentId);
                             }
                         }
+
+                        // Remove collaborator
+                        const collaborators = documentCollaborators.get(documentId);
+                        if (collaborators && userId) {
+                            collaborators.delete(userId);
+                            broadcastCollaborators(documentId);
+                        }
                     });
                 });
             } catch (error) {
-                console.error('WebSocket connection error:', error);
+                console.error('WebSocket upgrade error:', error);
                 socket.destroy();
             }
         }
     });
+
+    // Broadcast collaborators list to all clients
+    function broadcastCollaborators(documentId) {
+        const connections = documentConnections.get(documentId);
+        const collaborators = documentCollaborators.get(documentId);
+
+        if (connections && collaborators) {
+            const collaboratorsList = Array.from(collaborators.values());
+            const message = JSON.stringify({
+                type: 'collaborator-update',
+                collaborators: collaboratorsList
+            });
+
+            connections.forEach(client => {
+                if (client.readyState === WebSocket.OPEN) {
+                    client.send(message);
+                }
+            });
+        }
+    }
 
     // Periodically save document content
     setInterval(async () => {
         for (const [documentId, connections] of documentConnections.entries()) {
             if (connections.size > 0) {
                 try {
-                    // Get the document content from the first connection
-                    const ws = connections.values().next().value;
-                    if (ws.yDoc) {
-                        const ytext = ws.yDoc.getText('content');
+                    const yDoc = documentYDocs.get(documentId);
+                    if (yDoc) {
+                        const ytext = yDoc.getText('content');
                         const content = ytext.toString();
 
                         // Save to database if content exists
@@ -105,8 +190,9 @@ function setupWebSocketServer(server) {
     return wss;
 }
 
-async function checkDocumentAccess(documentId, uid) {
+async function checkDocumentAccess(documentId, userId) {
     try {
+        // Find document with owner and shared users
         const document = await Document.findOne({
             where: { id: documentId },
             include: [{
@@ -116,14 +202,30 @@ async function checkDocumentAccess(documentId, uid) {
             }]
         });
 
-        if (!document) return false;
-        if (document.userId === uid) return true;
+        if (!document) {
+            console.log(`Document ${documentId} not found`);
+            return { hasAccess: false };
+        }
 
-        const share = document.sharedWith.find(user => user.uid === uid);
-        return share && share.DocumentShare.role === 'editor';
+        // Check if user is the owner
+        if (document.userId === userId) {
+            console.log(`User ${userId} is the owner of document ${documentId}`);
+            return { hasAccess: true, isOwner: true, role: 'owner' };
+        }
+
+        // Check if document is shared with the user
+        const sharedUser = document.sharedWith && document.sharedWith.find(user => user.uid === userId);
+        if (sharedUser) {
+            const role = sharedUser.DocumentShare?.role || 'viewer';
+            console.log(`Document ${documentId} is shared with user ${userId} as ${role}`);
+            return { hasAccess: true, isOwner: false, role };
+        }
+
+        console.log(`User ${userId} does not have access to document ${documentId}`);
+        return { hasAccess: false };
     } catch (error) {
         console.error('Error checking document access:', error);
-        return false;
+        return { hasAccess: false };
     }
 }
 

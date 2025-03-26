@@ -1,8 +1,10 @@
 require('dotenv').config();
 const { Sequelize } = require('sequelize');
+const { exec } = require('child_process');
+const path = require('path');
 
 async function initializeDatabase() {
-    const adminSequelize = new Sequelize('postgres', process.env.DB_USER, process.env.DB_PASSWORD, {
+    const adminSequelize = new Sequelize('postgres', process.env.DB_USERNAME, process.env.DB_PASSWORD, {
         host: process.env.DB_HOST,
         dialect: 'postgres'
     });
@@ -20,6 +22,21 @@ async function initializeDatabase() {
     } finally {
         await adminSequelize.close();
     }
+
+    // Run migrations using sequelize-cli
+    console.log('Running migrations...');
+    exec('npx sequelize-cli db:migrate', (error, stdout, stderr) => {
+        if (error) {
+            console.error(`Migration error: ${error.message}`);
+            return;
+        }
+        if (stderr) {
+            console.error(`Migration stderr: ${stderr}`);
+            return;
+        }
+        console.log(`Migration stdout: ${stdout}`);
+        console.log('Database migrations completed successfully');
+    });
 }
 
-initializeDatabase(); 
+initializeDatabase();

@@ -9,13 +9,16 @@ class AuthService {
 
     async signInWithGoogle() {
         try {
+            console.log("Starting Google sign-in process");
             const result = await signInWithPopup(this.auth, this.provider);
-            const firebaseToken = await result.user.getIdToken();
+            const user = result.user;
+            console.log("Google sign-in successful:", user.displayName);
 
-            return {
-                user: result.user,
-                firebaseToken
-            };
+            // Get the Firebase ID token
+            const firebaseToken = await user.getIdToken();
+            console.log("Firebase token obtained");
+
+            return { user, firebaseToken };
         } catch (error) {
             console.error('Auth Error:', error);
             throw error;

@@ -26,7 +26,15 @@ export const fetchDocuments = createAsyncThunk(
     async (_, { getState }) => {
         const response = await api.get('/api/documents');
         console.log('Fetched documents:', response.data); // Debug log
-        return response.data.documents;
+
+        // Ensure all documents have the required fields
+        const documents = response.data.documents.map(doc => ({
+            ...doc,
+            owner: doc.owner || null,
+            sharedWith: doc.sharedWith || []
+        }));
+
+        return documents;
     }
 );
 
@@ -81,7 +89,18 @@ export const updateDocument = createAsyncThunk(
             }
 
             const data = await response.json();
-            return data.document;
+
+            // Get the current document from state to preserve fields that might not be returned by the API
+            const currentDocuments = getState().documents.items;
+            const currentDocument = currentDocuments.find(doc => doc.id === documentData.id);
+
+            // Merge the updated document with the current one to preserve fields
+            return {
+                ...currentDocument,
+                ...data.document,
+                owner: data.document.owner || currentDocument?.owner || null,
+                sharedWith: data.document.sharedWith || currentDocument?.sharedWith || []
+            };
         } catch (error) {
             console.error("Error updating document:", error);
             return rejectWithValue(error.message);
@@ -102,6 +121,18 @@ export const removeShare = createAsyncThunk(
     async ({ documentId, userId }) => {
         await api.delete(`/api/documents/${documentId}/share/${userId}`);
         return { documentId, userId };
+    }
+);
+
+export const deleteDocument = createAsyncThunk(
+    'documents/deleteDocument',
+    async (id, { rejectWithValue }) => {
+        try {
+            await api.delete(`/api/documents/${id}/permanent`);
+            return id;
+        } catch (error) {
+            return rejectWithValue(error.response?.data?.error || 'Failed to delete document');
+        }
     }
 );
 
@@ -172,12 +203,21 @@ const documentSlice = createSlice({
                 // Update the document in the items array
                 const index = state.items.findIndex(doc => doc.id === updatedDoc.id);
                 if (index !== -1) {
-                    state.items[index] = updatedDoc;
+                    // Preserve sharedWith and owner if they exist in the current document
+                    state.items[index] = {
+                        ...updatedDoc,
+                        sharedWith: updatedDoc.sharedWith || state.items[index].sharedWith || [],
+                        owner: updatedDoc.owner || state.items[index].owner || null
+                    };
                 }
 
                 // Update the current document if it's the same one
                 if (state.currentDocument?.id === updatedDoc.id) {
-                    state.currentDocument = updatedDoc;
+                    state.currentDocument = {
+                        ...updatedDoc,
+                        sharedWith: updatedDoc.sharedWith || state.currentDocument.sharedWith || [],
+                        owner: updatedDoc.owner || state.currentDocument.owner || null
+                    };
                 }
 
                 state.error = null;
@@ -203,6 +243,22 @@ const documentSlice = createSlice({
                         user => user.uid !== userId
                     );
                 }
+            })
+            // Delete Document
+            .addCase(deleteDocument.pending, (state) => {
+                state.isLoading = true;
+                state.error = null;
+            })
+            .addCase(deleteDocument.fulfilled, (state, action) => {
+                state.isLoading = false;
+                state.items = state.items.filter(doc => doc.id !== action.payload);
+                if (state.currentDocument && state.currentDocument.id === action.payload) {
+                    state.currentDocument = state.items.length > 0 ? state.items[0] : null;
+                }
+            })
+            .addCase(deleteDocument.rejected, (state, action) => {
+                state.isLoading = false;
+                state.error = action.payload;
             });
     }
 });

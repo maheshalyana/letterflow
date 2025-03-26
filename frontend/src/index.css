@@ -89,3 +89,42 @@ body {
     opacity: 1;
     visibility: visible;
 }
+
+/* Collaboration cursor styles */
+.collaboration-cursor__caret {
+    position: relative;
+    border-left: 1px solid;
+    margin-left: -1px;
+    margin-right: -1px;
+    pointer-events: none;
+    word-break: normal;
+    height: 1.2em;
+}
+
+.collaboration-cursor__label {
+    position: absolute;
+    top: -1.4em;
+    left: -1px;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: normal;
+    white-space: nowrap;
+    padding: 0.1rem 0.3rem;
+    border-radius: 3px 3px 3px 0;
+    user-select: none;
+    color: white;
+    z-index: 1;
+}
+
+/* Add styles for user avatars in cursors */
+.collaboration-cursor__avatar {
+    position: absolute;
+    top: -1.8em;
+    left: -10px;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    border: 2px solid white;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.1);
+    z-index: 2;
+}

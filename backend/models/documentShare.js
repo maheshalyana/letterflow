@@ -1,7 +1,18 @@
 const { Model } = require('sequelize');
 
 module.exports = (sequelize, DataTypes) => {
-    const DocumentShare = sequelize.define('DocumentShare', {
+    class DocumentShare extends Model {
+        static associate(models) {
+            // Define associations here if needed
+        }
+    }
+
+    DocumentShare.init({
+        id: {
+            type: DataTypes.INTEGER,
+            autoIncrement: true,
+            primaryKey: true
+        },
         documentId: {
             type: DataTypes.UUID,
             allowNull: false,
@@ -23,6 +34,9 @@ module.exports = (sequelize, DataTypes) => {
             defaultValue: 'editor',
             allowNull: false
         }
+    }, {
+        sequelize,
+        modelName: 'DocumentShare',
     });
 
     return DocumentShare;

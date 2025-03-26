@@ -1,63 +1,127 @@
 // This service is no longer needed as we're using Y.js
 // Keep it for reference or remove it
 
+import * as Y from 'yjs';
+import { WebsocketProvider } from 'y-websocket';
+import { useSelector } from 'react-redux';
+
 class WebSocketService {
     constructor() {
-        this.ws = null;
-        this.subscribers = new Map();
+        this.providers = new Map();
+        this.ydocs = new Map();
+        this.callbacks = new Map();
     }
 
-    connect(documentId, token) {
-        this.ws = new WebSocket(`ws://localhost:3003?documentId=${documentId}&token=${token}`);
-
-        this.ws.onopen = () => {
-            console.log('WebSocket Connected');
-        };
-
-        this.ws.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            const subscribers = this.subscribers.get(data.type) || [];
-            subscribers.forEach(callback => callback(data));
-        };
-
-        this.ws.onclose = () => {
-            console.log('WebSocket Disconnected');
-            // Try to reconnect after 3 seconds
-            setTimeout(() => this.connect(documentId, token), 3000);
-        };
-
-        this.ws.onerror = (error) => {
-            console.error('WebSocket Error:', error);
-        };
-    }
-
-    subscribe(type, callback) {
-        if (!this.subscribers.has(type)) {
-            this.subscribers.set(type, []);
+    // Connect to a document's WebSocket
+    connect(documentId, token, user) {
+        if (this.providers.has(documentId)) {
+            return this.providers.get(documentId);
         }
-        this.subscribers.get(type).push(callback);
+
+        // Create a new Y.js document
+        const ydoc = new Y.Doc();
+        this.ydocs.set(documentId, ydoc);
+
+        // Create WebSocket URL with authentication and user info
+        const wsUrl = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.hostname}:3003/documents`;
+
+        // Create WebSocket provider with proper params
+        const provider = new WebsocketProvider(wsUrl, documentId, ydoc, {
+            params: {
+                token,
+                documentId,
+                userName: user.name || 'Anonymous',
+                userId: user.uid || 'anonymous',
+                userPicture: user.picture || '',
+                userColor: this.getRandomColor()
+            }
+        });
+
+        // Set up awareness (for cursor positions and user info)
+        const awareness = provider.awareness;
+        awareness.setLocalState({
+            name: user.name || 'Anonymous',
+            color: this.getRandomColor(),
+            user: {
+                id: user.uid || 'anonymous',
+                name: user.name || 'Anonymous',
+                picture: user.picture || ''
+            }
+        });
+
+        // Handle messages from the server
+        provider.on('message', (event) => {
+            try {
+                const message = JSON.parse(event.data);
+                if (message.type && this.callbacks.has(message.type)) {
+                    this.callbacks.get(message.type).forEach(callback => callback(message));
+                }
+            } catch (e) {
+                // Not a JSON message, likely a Y.js protocol message
+            }
+        });
+
+        // Handle connection status
+        provider.on('status', (status) => {
+            console.log('Connection status:', status);
+        });
+
+        // Handle sync status
+        provider.on('sync', (isSynced) => {
+            console.log('Sync status:', isSynced ? 'synced' : 'not synced');
+        });
+
+        this.providers.set(documentId, provider);
+        return provider;
     }
 
-    unsubscribe(type, callback) {
-        const subscribers = this.subscribers.get(type);
-        if (subscribers) {
-            const index = subscribers.indexOf(callback);
-            if (index !== -1) {
-                subscribers.splice(index, 1);
+    // Disconnect from a document's WebSocket
+    disconnect(documentId) {
+        const provider = this.providers.get(documentId);
+        if (provider) {
+            provider.disconnect();
+            this.providers.delete(documentId);
+
+            const ydoc = this.ydocs.get(documentId);
+            if (ydoc) {
+                ydoc.destroy();
+                this.ydocs.delete(documentId);
             }
         }
     }
 
-    send(data) {
-        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-            this.ws.send(JSON.stringify(data));
-        }
+    // Get a Y.js document
+    getYDoc(documentId) {
+        return this.ydocs.get(documentId);
     }
 
-    disconnect() {
-        if (this.ws) {
-            this.ws.close();
+    // Subscribe to a message type
+    subscribe(type, callback) {
+        if (!this.callbacks.has(type)) {
+            this.callbacks.set(type, new Set());
         }
+        this.callbacks.get(type).add(callback);
+
+        return () => {
+            const callbacks = this.callbacks.get(type);
+            if (callbacks) {
+                callbacks.delete(callback);
+                if (callbacks.size === 0) {
+                    this.callbacks.delete(type);
+                }
+            }
+        };
+    }
+
+    // Generate a random color for user cursors
+    getRandomColor() {
+        const colors = [
+            '#f44336', '#e91e63', '#9c27b0', '#673ab7',
+            '#3f51b5', '#2196f3', '#03a9f4', '#00bcd4',
+            '#009688', '#4caf50', '#8bc34a', '#cddc39',
+            '#ffc107', '#ff9800', '#ff5722'
+        ];
+        return colors[Math.floor(Math.random() * colors.length)];
     }
 }
 

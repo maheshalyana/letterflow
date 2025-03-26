@@ -53,7 +53,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
                 attributes: ['uid', 'name', 'email', 'picture']
             }, {
                 model: User,
-                as: 'sharedWith',
+                as: 'sharedWithUsers',
                 attributes: ['uid', 'name', 'email', 'picture'],
                 through: { attributes: ['role'] }
             }]
@@ -96,24 +96,12 @@ router.post('/', authenticateToken, async (req, res) => {
     }
 });
 
-// Update document
-router.put('/:id', authenticateToken, async (req, res) => {
+// Add a helper function to check document permissions
+async function checkDocumentPermission(documentId, userId, requiredRole = 'editor') {
     try {
-        const { id } = req.params;
-        const { content, title } = req.body;
-
-        // Find document with permissions check
+        // Find document with owner and shared users
         const document = await Document.findOne({
-            where: {
-                id,
-                [Op.or]: [
-                    { userId: req.user.uid },
-                    {
-                        '$sharedWith.uid$': req.user.uid,
-                        '$sharedWith.DocumentShare.role$': 'editor'
-                    }
-                ]
-            },
+            where: { id: documentId },
             include: [{
                 model: User,
                 as: 'sharedWith',
@@ -122,52 +110,67 @@ router.put('/:id', authenticateToken, async (req, res) => {
         });
 
         if (!document) {
-            return res.status(404).json({
-                success: false,
-                error: 'Document not found or unauthorized'
-            });
+            return { hasAccess: false, message: 'Document not found' };
         }
 
-        // Create a draft before updating (optional)
-        if (content && document.content !== content) {
-            await Draft.create({
-                documentId: id,
-                userId: req.user.uid,
-                content: document.content || '',
-                savedAt: new Date()
-            });
+        // If user is the owner, they have full access
+        if (document.userId === userId) {
+            return { hasAccess: true, isOwner: true };
         }
 
-        // Update the document
+        // Check if document is shared with the user
+        const sharedUser = document.sharedWith?.find(user => user.uid === userId);
+
+        if (!sharedUser) {
+            return { hasAccess: false, message: 'Access denied' };
+        }
+
+        // Check if user has the required role
+        const userRole = sharedUser.DocumentShare?.role;
+
+        if (requiredRole === 'viewer' || userRole === requiredRole) {
+            return { hasAccess: true, isOwner: false, role: userRole };
+        }
+
+        return { hasAccess: false, message: 'Insufficient permissions' };
+    } catch (error) {
+        console.error('Error checking document permission:', error);
+        return { hasAccess: false, message: 'Server error' };
+    }
+}
+
+// Update document
+router.put('/:id', authenticateToken, async (req, res) => {
+    try {
+        const documentId = req.params.id;
+        const { title, content } = req.body;
+
+        // Check permissions
+        const permission = await checkDocumentPermission(documentId, req.user.uid, 'editor');
+
+        if (!permission.hasAccess) {
+            return res.status(403).json({ success: false, error: permission.message });
+        }
+
+        // Find document
+        const document = await Document.findByPk(documentId);
+
+        if (!document) {
+            return res.status(404).json({ success: false, error: 'Document not found' });
+        }
+
+        // Update document
         const updateData = {};
-        if (content !== undefined) updateData.content = content;
         if (title !== undefined) updateData.title = title;
+        if (content !== undefined) updateData.content = content;
         updateData.lastModified = new Date();
 
         await document.update(updateData);
 
-        // Get updated document with all associations
-        const updatedDocument = await Document.findOne({
-            where: { id },
-            include: [{
-                model: User,
-                as: 'owner',
-                attributes: ['uid', 'name', 'email', 'picture']
-            }, {
-                model: User,
-                as: 'sharedWith',
-                attributes: ['uid', 'name', 'email', 'picture'],
-                through: { attributes: ['role'] }
-            }]
-        });
-
-        res.json({
-            success: true,
-            document: updatedDocument
-        });
+        res.json({ success: true, document });
     } catch (error) {
         console.error('Error updating document:', error);
-        res.status(500).json({ success: false, error: 'Failed to update document' });
+        res.status(500).json({ success: false, error: 'Server error' });
     }
 });
 
@@ -189,6 +192,32 @@ router.delete('/:id', authenticateToken, async (req, res) => {
         res.json({ success: true, message: "Document archived" });
     } catch (error) {
         console.error('Error archiving document:', error);
+        res.status(500).json({ success: false, error: "Server error" });
+    }
+});
+
+// Permanently delete document
+router.delete('/:id/permanent', authenticateToken, async (req, res) => {
+    try {
+        const document = await Document.findOne({
+            where: { id: req.params.id }
+        });
+
+        if (!document) {
+            return res.status(404).json({ success: false, error: "Document not found" });
+        }
+
+        // Only the owner can permanently delete a document
+        if (document.userId !== req.user.uid) {
+            return res.status(403).json({ success: false, error: "Only the owner can delete this document" });
+        }
+
+        // Permanently delete the document
+        await document.destroy();
+
+        res.json({ success: true, message: "Document permanently deleted" });
+    } catch (error) {
+        console.error('Error deleting document:', error);
         res.status(500).json({ success: false, error: "Server error" });
     }
 });

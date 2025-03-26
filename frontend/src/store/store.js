@@ -1,28 +1,40 @@
-import { configureStore } from '@reduxjs/toolkit';
+import { configureStore, combineReducers } from '@reduxjs/toolkit';
 import { persistStore, persistReducer } from 'redux-persist';
 import storage from 'redux-persist/lib/storage';
 import userReducer from './userSlice';
 import documentReducer from './documentSlice';
 
-const persistConfig = {
-    key: 'root',
+// Configure persistence for user reducer
+const userPersistConfig = {
+    key: 'user',
     storage,
-    whitelist: ['user'] // Only persist user data
+    whitelist: ['currentUser', 'token'] // only persist these fields
 };
 
-const persistedUserReducer = persistReducer(persistConfig, userReducer);
+// Configure persistence for documents reducer
+const documentPersistConfig = {
+    key: 'documents',
+    storage,
+    whitelist: ['items', 'currentDocument'] // only persist these fields
+};
 
+// Combine reducers
+const rootReducer = combineReducers({
+    user: persistReducer(userPersistConfig, userReducer),
+    documents: persistReducer(documentPersistConfig, documentReducer)
+});
+
+// Create store
 export const store = configureStore({
-    reducer: {
-        user: persistedUserReducer,
-        documents: documentReducer
-    },
+    reducer: rootReducer,
     middleware: (getDefaultMiddleware) =>
         getDefaultMiddleware({
             serializableCheck: {
-                ignoredActions: ['persist/PERSIST', 'persist/REHYDRATE']
-            }
-        })
+                // Ignore these action types
+                ignoredActions: ['persist/PERSIST', 'persist/REHYDRATE'],
+            },
+        }),
 });
 
+// Create persistor
 export const persistor = persistStore(store); 
