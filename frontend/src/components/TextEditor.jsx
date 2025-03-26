@@ -83,11 +83,8 @@ const TextEditor = ({ onContentChange, currentDocument }) => {
 
     // Initialize Y.js document and provider
     useEffect(() => {
-        if (!currentDocument?.id || !currentUser || !token) return;
-
-        try {
-            // Connect to WebSocket
-            const newProvider = websocketService.connect(
+        if (currentDocument?.id && currentUser && token) {
+            const provider = websocketService.connect(
                 currentDocument.id,
                 token,
                 currentUser
@@ -102,18 +99,13 @@ const TextEditor = ({ onContentChange, currentDocument }) => {
                 ytext.insert(0, currentDocument.content);
             }
 
-            setProvider(newProvider);
+            setProvider(provider);
             setYdoc(newYdoc);
 
             // Mark collaboration as ready after a short delay to ensure sync
             setTimeout(() => {
                 setIsCollaborationReady(true);
             }, 500);
-        } catch (error) {
-            console.error("Error initializing collaboration:", error);
-            // Fall back to non-collaborative mode
-            setYdoc(null);
-            setProvider(null);
         }
 
         return () => {

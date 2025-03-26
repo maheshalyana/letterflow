@@ -8,6 +8,19 @@ const { setupWSConnection } = require('y-websocket/bin/utils');
 const { verifyToken } = require('./middleware/auth');
 const { sequelize } = require('./config/database');
 
+async function verifyAndDecodeToken(token) {
+    try {
+        if (!token) {
+            throw new Error('No token provided');
+        }
+        const decodedToken = await admin.auth().verifyIdToken(token);
+        return decodedToken;
+    } catch (error) {
+        console.error('Token verification error:', error);
+        throw error;
+    }
+}
+
 function setupWebSocketServer(server) {
     const wss = new WebSocket.Server({
         noServer: true,
@@ -66,18 +79,26 @@ function setupWebSocketServer(server) {
             try {
                 const token = query.token;
                 const documentId = query.documentId;
+
+                if (!token || !documentId) {
+                    console.error('Missing token or documentId');
+                    socket.destroy();
+                    return;
+                }
+
+                // Verify token first
+                const decodedToken = await verifyAndDecodeToken(token);
+                if (!decodedToken) {
+                    console.error('Invalid token');
+                    socket.destroy();
+                    return;
+                }
+
                 const userName = query.userName || 'Anonymous';
                 const userColor = query.userColor || '#' + Math.floor(Math.random() * 16777215).toString(16);
                 const userPicture = query.userPicture || '';
                 const userId = query.userId || '';
 
-                if (!token || !documentId) {
-                    socket.destroy();
-                    return;
-                }
-
-                // Verify token and document access
-                const decodedToken = await admin.auth().verifyIdToken(token);
                 const accessInfo = await checkDocumentAccess(documentId, decodedToken.uid);
 
                 if (!accessInfo.hasAccess) {
