@@ -1,0 +1,91 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  @apply bg-white text-gray-900;
+}
+
+.ProseMirror {
+  min-height: calc(100vh - 8rem);
+  outline: none;
+}
+
+.ProseMirror > * + * {
+  margin-top: 0.75em;
+}
+
+.ProseMirror p.is-editor-empty:first-child::before {
+  color: #adb5bd;
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
+.ProseMirror h1 {
+  font-size: 2em;
+  font-weight: 700;
+  margin-top: 1em;
+  margin-bottom: 0.5em;
+}
+
+.ProseMirror h2 {
+  font-size: 1.5em;
+  font-weight: 600;
+  margin-top: 0.75em;
+  margin-bottom: 0.5em;
+}
+
+.ProseMirror p {
+  margin: 0.5em 0;
+  line-height: 1.75;
+}
+
+.ProseMirror ul,
+.ProseMirror ol {
+  padding-left: 1.5em;
+  margin: 0.5em 0;
+}
+
+.ProseMirror li {
+  margin: 0.25em 0;
+}
+
+.ProseMirror blockquote {
+  border-left: 3px solid #e5e7eb;
+  padding-left: 1em;
+  margin: 1em 0;
+  color: #4b5563;
+}
+
+/* Remove other default styles that might conflict with Tailwind */
+
+/* Tooltip styles */
+.tooltip {
+    position: relative;
+}
+
+.tooltip::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 4px 8px;
+    background-color: #1f2937;
+    color: white;
+    font-size: 12px;
+    border-radius: 4px;
+    white-space: nowrap;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.2s ease-in-out;
+}
+
+.tooltip:hover::after {
+    opacity: 1;
+    visibility: visible;
+}
