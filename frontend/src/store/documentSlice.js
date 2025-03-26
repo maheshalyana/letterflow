@@ -1,11 +1,12 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import axios from 'axios';
+import { API_BASE_URL } from '../config/api';
 
 const token = localStorage.getItem('token');
 
 // Configure axios base URL
 const api = axios.create({
-    baseURL: 'http://localhost:3003',
+    baseURL: API_BASE_URL,
     headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`
@@ -42,7 +43,7 @@ export const createDocument = createAsyncThunk(
     'documents/create',
     async (documentData) => {
         const token = localStorage.getItem('token');
-        const response = await fetch('http://localhost:3003/api/documents', {
+        const response = await fetch(`${API_BASE_URL}/api/documents`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -61,7 +62,7 @@ export const updateDocument = createAsyncThunk(
     async (documentData, { rejectWithValue, getState }) => {
         try {
             const { token } = getState().user;
-            const API_URL = 'http://localhost:3003';
+            const API_URL = `${API_BASE_URL}/api/documents`;
 
             // Make sure we have the required fields
             if (!documentData.id) {

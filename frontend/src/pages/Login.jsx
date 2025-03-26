@@ -5,6 +5,7 @@ import authService from '../services/auth';
 import { setUser, setLoading, setError } from '../store/userSlice';
 import { RiGoogleFill } from 'react-icons/ri';
 import { toast } from 'react-toastify';
+import { API_BASE_URL } from '../config/api';
 
 const Login = () => {
     const dispatch = useDispatch();
@@ -21,7 +22,7 @@ const Login = () => {
             console.log("Firebase auth successful:", user);
 
             // Verify token with backend
-            const response = await fetch("http://localhost:3003/verify-token", {
+            const response = await fetch(`${API_BASE_URL}/verify-token`, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
