@@ -9,50 +9,73 @@ class WebSocketService {
     constructor() {
         this.connections = new Map();
         this.docs = new Map();
+        this.providers = new Map();
         this.callbacks = new Map();
-        this.reconnectAttempts = 0;
-        this.maxReconnectAttempts = 5;
-        this.reconnectDelay = 1000; // Start with 1 second
     }
 
     connect(documentId, token, currentUser) {
-        if (this.connections.has(documentId)) {
-            return this.connections.get(documentId);
+        if (this.providers.has(documentId)) {
+            return this.providers.get(documentId);
         }
 
-        // Create WebSocket URL with query parameters
+        // Get or create Y.js document
+        const ydoc = this.getYDoc(documentId);
+
+        // Create WebSocket provider with full URL including query parameters
         const wsUrl = new URL('/documents', WS_BASE_URL);
         wsUrl.searchParams.append('documentId', documentId);
-        wsUrl.searchParams.append('token', token); // Add the Firebase token
+        wsUrl.searchParams.append('token', token);
         wsUrl.searchParams.append('userName', currentUser.name || 'Anonymous');
         wsUrl.searchParams.append('userId', currentUser.uid);
         wsUrl.searchParams.append('userPicture', currentUser.picture || '');
         wsUrl.searchParams.append('userColor', this.getRandomColor());
 
-        // Create WebSocket connection
-        const ws = new WebSocket(wsUrl.toString());
+        const provider = new WebsocketProvider(
+            wsUrl.toString(), // Use the full URL with query parameters
+            documentId,
+            ydoc,
+            {
+                connect: true,
+                awareness: {
+                    user: {
+                        name: currentUser.name || 'Anonymous',
+                        color: this.getRandomColor(),
+                        id: currentUser.uid,
+                        picture: currentUser.picture || '',
+                    }
+                }
+            }
+        );
 
-        // Set up error handling
-        ws.onerror = (error) => {
-            console.error('WebSocket error:', error);
-            this.connections.delete(documentId);
-        };
+        // Store the provider
+        this.providers.set(documentId, provider);
 
-        ws.onclose = () => {
-            console.log('WebSocket connection closed');
-            this.connections.delete(documentId);
-        };
+        // Handle connection status
+        provider.on('status', event => {
+            console.log('Connection status:', event.status);
+            if (event.status === 'connected') {
+                console.log('WebSocket connected successfully');
+            }
+        });
 
-        // Store the connection
-        this.connections.set(documentId, ws);
-        return ws;
+        // Handle connection errors
+        provider.on('connection-error', error => {
+            console.error('WebSocket connection error:', error);
+        });
+
+        return provider;
     }
 
     disconnect(documentId) {
-        const ws = this.connections.get(documentId);
-        if (ws) {
-            ws.close();
-            this.connections.delete(documentId);
+        const provider = this.providers.get(documentId);
+        if (provider) {
+            provider.destroy();
+            this.providers.delete(documentId);
+        }
+        const doc = this.docs.get(documentId);
+        if (doc) {
+            doc.destroy();
+            this.docs.delete(documentId);
         }
     }
 

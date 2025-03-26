@@ -5,9 +5,9 @@ const isDevelopment = import.meta.env.DEV;
 // In production, use the host's domain/IP
 const DOMAIN = isDevelopment ? 'localhost' : window.location.hostname;
 
-// Use secure protocols in production
-const HTTP_PROTOCOL = isDevelopment ? 'http' : 'http';
-const WS_PROTOCOL = isDevelopment ? 'ws' : 'ws';
+// Use non-secure protocols since we don't have SSL
+const HTTP_PROTOCOL = 'http';
+const WS_PROTOCOL = 'ws';
 
 // Use the same port as your backend service
 const PORT = '3003';

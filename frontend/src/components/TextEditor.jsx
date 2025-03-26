@@ -84,40 +84,50 @@ const TextEditor = ({ onContentChange, currentDocument }) => {
     // Initialize Y.js document and provider
     useEffect(() => {
         if (currentDocument?.id && currentUser && token) {
-            const provider = websocketService.connect(
-                currentDocument.id,
-                token,
-                currentUser
-            );
+            try {
+                const provider = websocketService.connect(
+                    currentDocument.id,
+                    token,
+                    currentUser
+                );
 
-            const newYdoc = websocketService.getYDoc(currentDocument.id);
+                const newYdoc = websocketService.getYDoc(currentDocument.id);
 
-            // Set initial content in Y.js document if it's empty
-            const ytext = newYdoc.getText('content');
-            if (ytext.toString() === '' && currentDocument.content) {
-                // Only set content if Y.js document is empty
-                ytext.insert(0, currentDocument.content);
-            }
-
-            setProvider(provider);
-            setYdoc(newYdoc);
-
-            // Mark collaboration as ready after a short delay to ensure sync
-            setTimeout(() => {
-                setIsCollaborationReady(true);
-            }, 500);
-        }
-
-        return () => {
-            if (currentDocument?.id) {
-                try {
-                    websocketService.disconnect(currentDocument.id);
-                } catch (error) {
-                    console.error("Error disconnecting:", error);
+                // Set initial content in Y.js document if it's empty
+                const ytext = newYdoc.getText('content');
+                if (ytext.toString() === '' && currentDocument.content) {
+                    ytext.insert(0, currentDocument.content);
                 }
-                setIsCollaborationReady(false);
+
+                // Wait for provider to be connected before setting state
+                provider.on('status', ({ status }) => {
+                    console.log('Provider status:', status);
+                    if (status === 'connected') {
+                        setProvider(provider);
+                        setYdoc(newYdoc);
+                        setIsCollaborationReady(true);
+                    }
+                });
+
+                // Handle connection errors
+                provider.on('connection-error', (error) => {
+                    console.error('Provider connection error:', error);
+                    toast.error('Connection error. Please try refreshing the page.');
+                });
+
+                return () => {
+                    if (currentDocument?.id) {
+                        websocketService.disconnect(currentDocument.id);
+                        setIsCollaborationReady(false);
+                        setProvider(null);
+                        setYdoc(null);
+                    }
+                };
+            } catch (error) {
+                console.error('Error setting up collaboration:', error);
+                toast.error('Failed to initialize collaboration');
             }
-        };
+        }
     }, [currentDocument?.id, currentUser, token]);
 
     const editor = useEditor({
