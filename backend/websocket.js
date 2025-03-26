@@ -14,7 +14,14 @@ function setupWebSocketServer(server) {
         // Add ping/pong to detect stale connections
         clientTracking: true,
         pingInterval: 30000,
-        pingTimeout: 5000
+        pingTimeout: 5000,
+        // Add handling for secure connections
+        handleProtocols: (protocols) => {
+            if (protocols.includes('wss')) {
+                return 'wss';
+            }
+            return 'ws';
+        }
     });
 
     // Handle connection errors
