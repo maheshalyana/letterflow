@@ -47,7 +47,6 @@ const TextEditor = ({ onContentChange, currentDocument }) => {
 
     // Check if current user has edit permission
     const userShare = currentDocument?.sharedWith?.find(user => user.uid === currentUser?.uid);
-    console.log('User share:', userShare, currentDocument);
     const canEdit = isOwner || userShare?.DocumentShare?.role === 'editor';
 
     const [isSlashMenuOpen, setIsSlashMenuOpen] = useState(false);
@@ -288,24 +287,27 @@ const TextEditor = ({ onContentChange, currentDocument }) => {
                             </div>
 
                             {/* Save to Drive Button */}
-                            <button
-                                onClick={handleSaveToDrive}
-                                disabled={isSavingToDrive}
-                                className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                                title="Save to Google Drive"
-                            >
-                                {isSavingToDrive ? (
-                                    <>
-                                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                                        <span>Saving...</span>
-                                    </>
-                                ) : (
-                                    <>
-                                        <RiDriveFill className="w-4 h-4" />
-                                        <span>Save to Drive</span>
-                                    </>
+                            {
+                                isOwner && (
+                                    <button
+                                        onClick={handleSaveToDrive}
+                                        disabled={isSavingToDrive}
+                                        className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                                        title="Save to Google Drive"
+                                    >
+                                        {isSavingToDrive ? (
+                                            <>
+                                                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                                                <span>Saving...</span>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <RiDriveFill className="w-4 h-4" />
+                                                <span>Save to Drive</span>
+                                            </>
+                                        )}
+                                    </button>
                                 )}
-                            </button>
                         </div>
                     ) : (
                         <div className="p-2 bg-gray-100 text-gray-700 text-sm">
@@ -329,7 +331,7 @@ const TextEditor = ({ onContentChange, currentDocument }) => {
                     />
                 </div>
             </div>
-        </div>
+        </div >
     );
 };
 
